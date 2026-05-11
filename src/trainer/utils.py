@@ -132,3 +132,59 @@ def compute_satimp_loss(model, inputs, beta1, beta2):
         shift_labels.view(-1) != -100
     ].mean()
     return forget_loss, outputs
+
+def compute_eua_loss(model, forget_inputs, retain_inputs,beta1, beta2, ref_model=None):
+    def get_preference_tensors(logits, ratio=0.1):
+        assert 0 < ratio < 1
+        dim = logits.shape[1]
+        k = int(dim * ratio)
+        if k == 0:
+            raise ValueError("ratio too small, leading k=0.")
+
+        # top ratio%
+        topk_values, topk_indices = torch.topk(logits, k, dim=1)
+        preference_positive = torch.zeros_like(logits)
+        preference_positive.scatter_(1, topk_indices, topk_values)
+
+        # bottom ratio%
+        bottomk_values, bottomk_indices = torch.topk(-logits, k, dim=1)
+        preference_negative = torch.zeros_like(logits)
+        preference_negative.scatter_(1, bottomk_indices, logits.gather(1, bottomk_indices))
+
+        return preference_positive, preference_negative
+    #forget
+    outputs = model(**forget_inputs)
+    labels = forget_inputs["labels"]
+    labels = labels.to(outputs.logits.device)
+
+    shift_logits = outputs.logits[..., :-1, :].contiguous()
+    shift_labels = labels[..., 1:].contiguous()
+    en_out = -torch.logsumexp(shift_logits.view(-1, shift_logits.size(-1))/beta2, dim=1)
+
+    #retain
+    retain_outputs = model(**retain_inputs)
+    retain_labels = retain_inputs["labels"]
+    retain_labels = retain_labels.to(retain_outputs.logits.device)
+    
+    shift_retain_logits = retain_outputs.logits[..., :-1, :].contiguous()
+    shift_retain_labels = retain_labels[..., 1:].contiguous()
+    en_in = -torch.logsumexp(shift_retain_logits.view(-1, shift_retain_logits.size(-1))/beta2, dim=1)
+
+    with torch.no_grad():
+        forget_outputs_oracle = ref_model(**forget_inputs)
+        retain_outputs_oracle = ref_model(**retain_inputs)
+        retain_logits_oracle = retain_outputs_oracle.logits[..., :-1, :].contiguous()
+        forget_logits_oracle = forget_outputs_oracle.logits[..., :-1, :].contiguous()
+
+        forget_positive, forget_negative = get_preference_tensors(forget_logits_oracle.view(-1, forget_logits_oracle.size(-1)),ratio=beta1)
+        retain_positive, retain_negative = get_preference_tensors(retain_logits_oracle.view(-1, retain_logits_oracle.size(-1)),ratio=beta1)
+
+        margin_out = -torch.logsumexp(forget_negative/beta2, dim=1)
+        margin_in =  -torch.logsumexp(retain_positive/beta2, dim=1)
+
+    eua_loss = (torch.pow(F.relu(en_in-margin_in), 2)[shift_retain_labels.view(-1) != -100].mean() + torch.pow(F.relu(margin_out-en_out), 2)[shift_labels.view(-1) != -100].mean())
+    return eua_loss, outputs
+
+
+
+

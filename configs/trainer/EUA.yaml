@@ -1,15 +1,15 @@
 defaults:
   - GradDiff
 
-handler: SatImp
+handler: EUA
 
 args: # HuggingFace TrainingArguments
   learning_rate: 1e-5
-  num_train_epochs: 5
+  num_train_epochs: 10
 
 method_args:
-  beta1: 5.0
-  beta2: 0.5
-  alpha: 1.0
-  gamma: 0.1
+  beta1: 0.1
+  beta2: 1.0
+  alpha: 1.0   #retain_loss
+  gamma: 0.05    #forget_loss
   retain_loss_type: NLL
