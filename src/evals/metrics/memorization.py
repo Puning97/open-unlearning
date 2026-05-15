@@ -268,6 +268,7 @@ def extraction_strength(model, **kwargs):
     es_values = aggregate_to_1D(es_values)
     return {"agg_value": np.mean(es_values), "value_by_index": scores_by_index}
 
+
 @unlearning_metric(name="retain_extraction_strength")
 def retain_extraction_strength(model, **kwargs):
     data = kwargs["data"]
